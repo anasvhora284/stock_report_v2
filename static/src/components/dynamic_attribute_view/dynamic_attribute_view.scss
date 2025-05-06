@@ -72,6 +72,11 @@
                 border-top-right-radius: 0.5rem;
             }
 
+            thead th {
+                background: #71639e;
+                color: white
+            }
+
             tbody tr:last-child td:first-child {
                 border-bottom-left-radius: 0.5rem;
             }

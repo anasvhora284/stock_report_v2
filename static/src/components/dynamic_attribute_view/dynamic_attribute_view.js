@@ -27,6 +27,10 @@ export class DynamicAttributeView extends Component {
         const context = this.props.action.context || {};
         this.configId = context.config_id || false;
         
+        // Bind methods that need to access 'this'
+        this.handleCellClick = this.handleCellClick.bind(this);
+        this.handleVariantClick = this.handleVariantClick.bind(this);
+        
         this.state = useState({
             products: [],
             variants: [],
@@ -418,5 +422,36 @@ export class DynamicAttributeView extends Component {
     handleVariantClick(variant, productId) {
         this.showVariantDetails(variant);
         this.updateProductImage(productId, variant.id);
+    }
+
+    // Get all unique column headers from all products
+    getUniqueColumnHeaders() {
+        const columnSet = new Set();
+        this.state.filteredProducts.forEach(product => {
+            if (product.matrix_values && product.matrix_values.column_headers) {
+                product.matrix_values.column_headers.forEach(column => {
+                    columnSet.add(column);
+                });
+            }
+        });
+        return Array.from(columnSet).sort();
+    }
+    
+    // Find the cell for a given column and row
+    getCellForColumnAndRow(product, row, columnName) {
+        if (!product.matrix_values || !product.matrix_values.column_headers) {
+            return null;
+        }
+        
+        // Find the column index in this product's column headers
+        const columnIndex = product.matrix_values.column_headers.indexOf(columnName);
+        
+        // If this product doesn't have this column, return null
+        if (columnIndex === -1) {
+            return null;
+        }
+        
+        // Return the cell at this position
+        return row.cells[columnIndex] || null;
     }
 } 
