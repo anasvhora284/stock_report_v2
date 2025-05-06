@@ -1,0 +1,78 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Compiled JS/CSS assets (if built with Webpack or similar)
+*.bundle.js
+*.min.js
+*.min.css
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.bak
+*.~*
+
+# macOS system files
+.DS_Store
+
+# VSCode settings
+.vscode/
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+.pdm.toml
+.poetry/
+
+# IDE settings
+.idea/
+*.iml
+
+# Node modules (if using for frontend)
+node_modules/
+npm-debug.log*
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Odoo generated files
+*.db
+*.zip
+*.xmlrpc
+*.pickle
+
+# Odoo test files and output
+*.xlsx
+*.pdf
+test-output/
+coverage.xml
+nosetests.xml
+
+# Pycharm/Odoo plugin
+.odoo/
+
+# Odoo cache
+*.mr.developer.cfg
+.eggs/
+parts/
+bin/
+
+# Temporary files
+*.orig
+
+# Static asset cache
+/static/*/lib/
+static/*/dist/
+
+# Optional: pyproject/build-system config
+.mypy_cache/
+.pytest_cache/
+.coverage
+.tox/
