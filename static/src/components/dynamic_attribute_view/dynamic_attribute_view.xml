@@ -86,7 +86,6 @@
 
                                                 <!-- Matrix style product details -->
                                                 <td class="product-name-cell">
-
                                                     <!-- Only show attribute matrix if we have multiple attributes -->
                                                     <t t-if="state.attributes.length > 1">
                                                         <table class="table table-bordered inner-table mb-0">
@@ -176,6 +175,40 @@
                                     </t>
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Pagination Controls -->
+                    <div t-if="state.totalCount > 0" class="pagination-container d-flex justify-content-between align-items-center p-3 border-top">
+                        <div class="pagination-info">
+                            <span>Showing <b t-esc="state.products.length"/> of <b t-esc="state.totalCount"/> products</span>
+                        </div>
+                        <div class="pagination-controls">
+                            <nav aria-label="Product pagination">
+                                <ul class="pagination mb-0">
+                                    <li t-attf-class="page-item {{ state.currentPage === 1 ? 'disabled' : '' }}">
+                                        <a class="page-link" href="#" aria-label="Previous" t-on-click.prevent="() => this.prevPage()">
+                                            <span aria-hidden="true">&#171;</span>
+                                        </a>
+                                    </li>
+                                    
+                                    <t t-set="startPage" t-value="Math.max(1, state.currentPage - 2)"/>
+                                    <t t-set="endPage" t-value="Math.min(state.totalPages || 1, startPage + 4)"/>
+                                    <t t-set="startPage" t-value="Math.max(1, endPage - 4)"/>
+                                    
+                                    <t t-foreach="Array.from({length: (endPage - startPage + 1)}, (_, i) => startPage + i)" t-as="page" t-key="page">
+                                        <li t-attf-class="page-item {{ page === state.currentPage ? 'active' : '' }}">
+                                            <a class="page-link" href="#" t-on-click.prevent="() => this.changePage(page)" t-esc="page"></a>
+                                        </li>
+                                    </t>
+                                    
+                                    <li t-attf-class="page-item {{ state.currentPage >= (state.totalPages || 1) ? 'disabled' : '' }}">
+                                        <a class="page-link" href="#" aria-label="Next" t-on-click.prevent="() => this.nextPage()">
+                                            <span aria-hidden="true">&#187;</span>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </nav>
                         </div>
                     </div>
                 </div>

@@ -81,101 +81,312 @@ class ProductAttributeReport(models.Model):
         filter_zero = options.get('filter_zero', False)
         include_negative = options.get('include_negative', True)
         use_forecast = options.get('use_forecast', False)
+        limit = options.get('limit', 500)
+        offset = options.get('offset', 0)
+        search_term = options.get('search_term', '')
         
         attributes = self.env['product.attribute'].browse(attribute_ids or [])
         if not attributes and not attribute_ids:
             attributes = self.env['product.attribute'].search([], limit=10)
 
-        domain = [('type', '=', 'product'), ('active', '=', True)]
-        if attribute_ids:
-            templates = self.env['product.template.attribute.value'].search(
-                [('attribute_id', 'in', attribute_ids)]
-            ).mapped('product_tmpl_id')
-            if templates:
-                domain.append(('product_tmpl_id', 'in', templates.ids))
+        params = []
         
-        products = self.env['product.product'].search(domain)
+        query = """
+            WITH stock_data AS (
+                SELECT 
+                    sq.product_id,
+                    SUM(sq.quantity) as qty_available,
+                    SUM(sq.reserved_quantity) as reserved_qty
+                FROM stock_quant sq
+                JOIN stock_location sl ON sq.location_id = sl.id
+                WHERE sl.usage = 'internal'
+                GROUP BY sq.product_id
+            )
+            SELECT
+                pp.id, pp.product_tmpl_id, pt.name, pp.default_code,
+                COALESCE(sd.qty_available, 0) as qty_available,
+                COALESCE(sm_in.incoming_qty, 0) as incoming_qty,
+                COALESCE(sm_out.outgoing_qty, 0) as outgoing_qty,
+                pt.uom_id, uu.name as uom_name,
+                COALESCE(sd.reserved_qty, 0) as reserved_qty
+            FROM product_product pp
+            JOIN product_template pt ON pp.product_tmpl_id = pt.id
+            LEFT JOIN stock_data sd ON pp.id = sd.product_id
+            LEFT JOIN (
+                SELECT product_id, SUM(product_qty) as incoming_qty 
+                FROM stock_move 
+                WHERE state IN ('assigned', 'confirmed', 'waiting') 
+                  AND location_dest_id IN (SELECT id FROM stock_location WHERE usage = 'internal')
+                  AND location_id NOT IN (SELECT id FROM stock_location WHERE usage = 'internal')
+                GROUP BY product_id
+            ) sm_in ON pp.id = sm_in.product_id
+            LEFT JOIN (
+                SELECT product_id, SUM(product_qty) as outgoing_qty 
+                FROM stock_move 
+                WHERE state IN ('assigned', 'confirmed', 'waiting') 
+                  AND location_id IN (SELECT id FROM stock_location WHERE usage = 'internal')
+                  AND location_dest_id NOT IN (SELECT id FROM stock_location WHERE usage = 'internal')
+                GROUP BY product_id
+            ) sm_out ON pp.id = sm_out.product_id
+            LEFT JOIN uom_uom uu ON pt.uom_id = uu.id
+            WHERE pt.active = true AND pt.type = 'product'
+        """
+        
+        # Add attribute filter
+        if attribute_ids:
+            query += """
+                AND pt.id IN (
+                    SELECT product_tmpl_id 
+                    FROM product_template_attribute_value 
+                    WHERE attribute_id IN %s
+                )
+            """
+            params.append(tuple(attribute_ids) if len(attribute_ids) > 1 else (attribute_ids[0],))
+        
+        # Add search filter
+        if search_term:
+            query += """
+                AND (
+                    pt.name ILIKE %s
+                    OR pp.default_code ILIKE %s
+                )
+            """
+            search_pattern = f'%{search_term}%'
+            params.extend([search_pattern, search_pattern])
+        
+        # Add quantity filters
+        if filter_zero:
+            query += " AND COALESCE(sd.qty_available, 0) != 0"
+        
+        if not include_negative:
+            query += " AND COALESCE(sd.qty_available, 0) >= 0"
+        
+        # Add pagination
+        query += " ORDER BY pt.name LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        self.env.cr.execute(query, params)
+        products = self.env.cr.dictfetchall()
+        
         if not products:
             return {'products': [], 'variants': [], 'attributes': self._prepare_attribute_data(attributes)}
         
-        fields_to_read = ['id', 'name', 'default_code', 'qty_available', 'virtual_available', 
-                          'incoming_qty', 'outgoing_qty', 'uom_id', 'uom_name', 'product_tmpl_id', 'image_1920']
-        product_data = products.read(fields_to_read)
+        # Get attribute values efficiently with a single query
+        product_ids = [p['id'] for p in products]
         
-        for product in product_data:
+        # Default empty attributes if no products
+        product_attributes = {}
+        
+        if product_ids:
+            attribute_query = """
+                SELECT 
+                    pp.id AS product_id,
+                    pa.id AS attribute_id,
+                    pav.id AS value_id
+                FROM product_product pp
+                JOIN product_template_attribute_value ptav ON ptav.ptav_product_variant_ids @> ARRAY[pp.id]
+                JOIN product_attribute_value pav ON ptav.product_attribute_value_id = pav.id
+                JOIN product_attribute pa ON pav.attribute_id = pa.id
+                WHERE pp.id IN %s
+            """
+            self.env.cr.execute(attribute_query, [tuple(product_ids) if len(product_ids) > 1 else (product_ids[0],)])
+            attribute_data = self.env.cr.dictfetchall()
+            
+            # Organize attribute data by product
+            for attr in attribute_data:
+                if attr['product_id'] not in product_attributes:
+                    product_attributes[attr['product_id']] = {}
+                product_attributes[attr['product_id']][attr['attribute_id']] = attr['value_id']
+        
+        # Prepare product and variant data
+        for product in products:
             product['image_url'] = f'/web/image/product.product/{product["id"]}/image_1920'
-            product['reserved_quantity'] = product['qty_available'] - (product['virtual_available'] - product['incoming_qty'])
+            product['reserved_quantity'] = product['reserved_qty']
+            product['virtual_available'] = product['qty_available'] - product['reserved_qty'] + product['incoming_qty']
         
-        qty_field = 'virtual_available' if use_forecast else 'qty_available'
-        if filter_zero:
-            product_data = [p for p in product_data if p[qty_field] != 0]
-        if not include_negative:
-            product_data = [p for p in product_data if p[qty_field] >= 0]
-            
         variants = []
-        for product in product_data:
-            product_obj = self.env['product.product'].browse(product['id'])
-            attributes_data = {}
-            
-            for ptav in product_obj.product_template_attribute_value_ids:
-                if ptav.attribute_id.id in (attribute_ids or attributes.ids):
-                    attributes_data[ptav.attribute_id.id] = ptav.product_attribute_value_id.id
-            
+        for product in products:
             main_qty = product['virtual_available'] if use_forecast else product['qty_available']
             
             variants.append({
                 'id': product['id'],
                 'product_id': product['id'],
-                'product_tmpl_id': product['product_tmpl_id'][0] if isinstance(product['product_tmpl_id'], tuple) else product['product_tmpl_id'],
+                'product_tmpl_id': product['product_tmpl_id'],
                 'name': product['name'],
                 'default_code': product['default_code'],
                 'qty': main_qty,
                 'qty_on_hand': product['qty_available'],
                 'qty_available': product['virtual_available'],
                 'qty_incoming': product['incoming_qty'],
-                'qty_outgoing': product.get('outgoing_qty', 0.0),
-                'qty_reserved': product['reserved_quantity'],
-                'uom_id': product['uom_id'][0] if isinstance(product['uom_id'], tuple) else product['uom_id'],
+                'qty_outgoing': product['outgoing_qty'],
+                'qty_reserved': product['reserved_qty'],
+                'uom_id': product['uom_id'],
                 'uom_name': product['uom_name'],
                 'product_url': f'/web#id={product["id"]}&model=product.product&view_type=form',
                 'image_url': f'/web/image/product.product/{product["id"]}/image_1920',
-                'attributes': attributes_data
+                'attributes': product_attributes.get(product['id'], {})
             })
-            
+        
+        # Get total count for pagination
+        count_query = """
+            SELECT COUNT(pp.id) as count
+            FROM product_product pp
+            JOIN product_template pt ON pp.product_tmpl_id = pt.id
+            LEFT JOIN (
+                SELECT 
+                    sq.product_id,
+                    SUM(sq.quantity) as qty_available
+                FROM stock_quant sq
+                JOIN stock_location sl ON sq.location_id = sl.id
+                WHERE sl.usage = 'internal'
+                GROUP BY sq.product_id
+            ) sd ON pp.id = sd.product_id
+            WHERE pt.active = true AND pt.type = 'product'
+        """
+        
+        count_params = []
+        if attribute_ids:
+            count_query += """
+                AND pt.id IN (
+                    SELECT product_tmpl_id 
+                    FROM product_template_attribute_value 
+                    WHERE attribute_id IN %s
+                )
+            """
+            count_params.append(tuple(attribute_ids) if len(attribute_ids) > 1 else (attribute_ids[0],))
+        
+        if search_term:
+            count_query += """
+                AND (
+                    pt.name ILIKE %s
+                    OR pp.default_code ILIKE %s
+                )
+            """
+            count_params.extend([f'%{search_term}%', f'%{search_term}%'])
+        
+        if filter_zero:
+            count_query += " AND COALESCE(sd.qty_available, 0) != 0"
+        
+        if not include_negative:
+            count_query += " AND COALESCE(sd.qty_available, 0) >= 0"
+        
+        self.env.cr.execute(count_query, count_params)
+        count_result = self.env.cr.dictfetchone()
+        total_count = count_result['count'] if count_result else 0
+        
         return {
-            'products': product_data,
+            'products': products,
             'variants': variants,
-            'attributes': self._prepare_attribute_data(attributes)
+            'attributes': self._prepare_attribute_data(attributes),
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset
         }
+        
+    def _get_total_product_count(self, options):
+        """Get total count of products for pagination"""
+        attribute_ids = options.get('attribute_ids', [])
+        filter_zero = options.get('filter_zero', False)
+        include_negative = options.get('include_negative', True)
+        use_forecast = options.get('use_forecast', False)
+        search_term = options.get('search_term', '')
+        
+        params = []
+        query = """
+            SELECT COUNT(pp.id) as count
+            FROM product_product pp
+            JOIN product_template pt ON pp.product_tmpl_id = pt.id
+            LEFT JOIN (
+                SELECT product_id, SUM(quantity) as qty_available 
+                FROM stock_quant 
+                JOIN stock_location ON stock_quant.location_id = stock_location.id
+                WHERE stock_location.usage = 'internal'
+                GROUP BY product_id
+            ) sq ON pp.id = sq.product_id
+            WHERE pt.active = true AND pt.type = 'product'
+        """
+        
+        if attribute_ids:
+            query += """
+                AND pt.id IN (
+                    SELECT product_tmpl_id 
+                    FROM product_template_attribute_value 
+                    WHERE attribute_id IN %s
+                )
+            """
+            params.append(tuple(attribute_ids))
+        
+        if search_term:
+            query += """
+                AND (
+                    pt.name ILIKE %s
+                    OR pp.default_code ILIKE %s
+                )
+            """
+            search_pattern = f'%{search_term}%'
+            params.extend([search_pattern, search_pattern])
+        
+        qty_field = 'virtual_available' if use_forecast else 'qty_available'
+        if filter_zero:
+            query += f" AND COALESCE(sq.qty_available, 0) != 0"
+        
+        if not include_negative:
+            query += f" AND COALESCE(sq.qty_available, 0) >= 0"
+        
+        self.env.cr.execute(query, params)
+        result = self.env.cr.dictfetchone()
+        return result['count'] if result else 0
     
     @api.model
     def get_report_data_by_config(self, config_id):
+        """Get report data based on configuration ID with pagination support"""
+        params = self.env.context.get('params', {})
+        page = int(params.get('page', 1))
+        page_size = int(params.get('page_size', 20))
+        search_term = params.get('search_term', '')
+        
         if not config_id:
             return {'error': 'No configuration ID provided'}
             
         config = self.env['stock.report.config'].browse(config_id)
-        if not config:
+        if not config.exists():
             return {'error': 'Configuration not found'}
             
+        # Calculate offset for pagination
+        offset = (page - 1) * page_size
+        
         options = {
             'attribute_ids': config.attribute_ids.ids,
             'filter_zero': config.filter_zero,
             'include_negative': config.include_negative,
             'use_forecast': config.use_forecast,
+            'limit': page_size,
+            'offset': offset,
+            'search_term': search_term
         }
         
+        # Get data with pagination
         data = self.get_attribute_data(options)
         
+        # Group variants by product template
         templates = {}
         template_variants = defaultdict(list)
         
         for variant in data['variants']:
             template_id = variant['product_tmpl_id']
             if template_id not in templates:
-                template = self.env['product.template'].browse(template_id)
+                # Get template data without loading the whole record
+                query = """
+                    SELECT id, name 
+                    FROM product_template 
+                    WHERE id = %s
+                """
+                self.env.cr.execute(query, [template_id])
+                template_data = self.env.cr.dictfetchone()
+                
                 templates[template_id] = {
                     'id': template_id,
-                    'name': template.name,
+                    'name': template_data['name'],
                     'image': f'/web/image/product.template/{template_id}/image_1920',
                     'product_url': f'/web#id={template_id}&model=product.template&view_type=form',
                     'attributes': {},
@@ -186,38 +397,83 @@ class ProductAttributeReport(models.Model):
         
         result = {
             'attributes': data['attributes'],
-            'products': []
+            'products': [],
+            'pagination': {
+                'total': data.get('total_count', 0),
+                'page': page,
+                'page_size': page_size,
+                'pages': (data.get('total_count', 0) + page_size - 1) // page_size if data.get('total_count', 0) > 0 else 1
+            }
         }
         
-        for template_id, template_data in templates.items():
-            variants = template_variants[template_id]
-            template_attributes = {}
-            
-            template_obj = self.env['product.template'].browse(template_id)
-            attribute_lines = template_obj.attribute_line_ids
-            
-            for line in attribute_lines:
-                if line.attribute_id.id in config.attribute_ids.ids:
-                    template_attributes[line.attribute_id.id] = {
-                        'id': line.attribute_id.id,
-                        'name': line.attribute_id.name,
-                        'values': [{
-                            'id': value.id,
-                            'name': value.name,
-                            'html_color': value.html_color
-                        } for value in line.value_ids]
+        # Get template attributes with a single optimized query if we have templates
+        if templates:
+            template_ids = list(templates.keys())
+            if template_ids:
+                attr_query = """
+                    SELECT 
+                        tal.product_tmpl_id,
+                        pa.id AS attribute_id,
+                        pa.name AS attribute_name,
+                        pav.id AS value_id,
+                        pav.name AS value_name,
+                        pav.html_color
+                    FROM product_template_attribute_line tal
+                    JOIN product_attribute pa ON tal.attribute_id = pa.id
+                    JOIN product_attribute_value pav ON pav.id IN (
+                        SELECT value_id FROM product_template_attribute_line_product_attribute_value_rel
+                        WHERE line_id = tal.id
+                    )
+                    WHERE tal.product_tmpl_id IN %s
+                """
+                params = [tuple(template_ids)]
+                
+                if config.attribute_ids:
+                    attr_query += " AND pa.id IN %s"
+                    params.append(tuple(config.attribute_ids.ids))
+                
+                self.env.cr.execute(attr_query, params)
+                attr_results = self.env.cr.dictfetchall()
+                
+                # Organize template attributes
+                template_attr_data = {}
+                for attr in attr_results:
+                    tmpl_id = attr['product_tmpl_id']
+                    attr_id = attr['attribute_id']
+                    
+                    if tmpl_id not in template_attr_data:
+                        template_attr_data[tmpl_id] = {}
+                        
+                    if attr_id not in template_attr_data[tmpl_id]:
+                        template_attr_data[tmpl_id][attr_id] = {
+                            'id': attr_id,
+                            'name': attr['attribute_name'],
+                            'values': []
+                        }
+                    
+                    # Add value if not already added
+                    value_exists = any(v['id'] == attr['value_id'] for v in template_attr_data[tmpl_id][attr_id]['values'])
+                    if not value_exists:
+                        template_attr_data[tmpl_id][attr_id]['values'].append({
+                            'id': attr['value_id'],
+                            'name': attr['value_name'],
+                            'html_color': attr['html_color']
+                        })
+                
+                # Now populate product data
+                for template_id, template_data in templates.items():
+                    variants = template_variants[template_id]
+                    
+                    product_data = {
+                        'id': template_id,
+                        'name': template_data['name'],
+                        'image_url': template_data['image'],
+                        'product_url': template_data['product_url'],
+                        'variants': variants,
+                        'template_attributes': template_attr_data.get(template_id, {})
                     }
-            
-            product_data = {
-                'id': template_id,
-                'name': template_data['name'],
-                'image_url': template_data['image'],
-                'product_url': template_data['product_url'],
-                'variants': variants,
-                'template_attributes': template_attributes
-            }
-            
-            result['products'].append(product_data)
+                    
+                    result['products'].append(product_data)
         
         return result
         

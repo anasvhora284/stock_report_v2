@@ -10,6 +10,7 @@ A powerful Odoo module that provides a dynamic, matrix-style view for visualizin
 - **Variant Details**: Detailed modal view showing comprehensive variant information
 - **Configurable Reports**: Create multiple report configurations with different attributes
 - **Auto-generated Menus**: Each configuration automatically creates its own menu entry
+- **Optimized Performance**: Efficient SQL queries and pagination for handling large datasets (5000+ products)
 
 ## Installation
 
@@ -41,6 +42,17 @@ A powerful Odoo module that provides a dynamic, matrix-style view for visualizin
 4. Use the dropdown to filter by quantity status (available, negative, zero, etc.)
 5. Click on any quantity cell to view detailed information about that variant
 6. Use the "Refresh" button to update data with the latest stock information
+7. Navigate between pages using the pagination controls at the bottom for large datasets
+
+## Performance
+
+The module is optimized for handling large product catalogs:
+
+- Pagination support breaks large datasets into manageable chunks
+- Direct SQL queries for better performance than ORM for large datasets
+- Image loading optimizations to improve page rendering speed
+- Client-side filtering for faster user experience after initial load
+- Efficient matrix generation algorithm for variant display
 
 ## Technical Documentation
 

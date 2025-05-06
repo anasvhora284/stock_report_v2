@@ -38,7 +38,12 @@ export class DynamicAttributeView extends Component {
             expandedProducts: {},
             config: null,
             showVariantModal: false,
-            selectedVariant: null
+            selectedVariant: null,
+            // Pagination state
+            currentPage: 1,
+            pageSize: 20,
+            totalCount: 0,
+            totalPages: 1
         });
 
         onWillStart(async () => {
@@ -67,14 +72,31 @@ export class DynamicAttributeView extends Component {
         try {
             if (!this.state.config) return;
             
+            this.state.loading = true;
+            
             const result = await this.orm.call(
-                "product.attribute.report",
-                "get_report_data_by_config",
-                [this.configId]
+                "product.attribute.report", 
+                "get_report_data_by_config", 
+                [this.configId],
+                {
+                    context: {
+                        params: {
+                            page: this.state.currentPage,
+                            page_size: this.state.pageSize,
+                            search_term: this.state.searchInput || ''
+                        }
+                    }
+                }
             );
             
             this.state.products = result.products || [];
             this.state.attributes = result.attributes || [];
+            
+            // Update pagination data
+            if (result.pagination) {
+                this.state.totalCount = result.pagination.total;
+                this.state.totalPages = result.pagination.pages;
+            }
             
             let allVariants = [];
             this.state.products.forEach(product => {
@@ -85,9 +107,11 @@ export class DynamicAttributeView extends Component {
             this.state.variants = allVariants;
             
             this.applyFilters();
+            this.state.loading = false;
         } catch (error) {
             console.error("Error fetching data:", error);
             this.notification.add(_t("Failed to fetch data"), { type: "danger" });
+            this.state.loading = false;
         }
     }
 
@@ -160,31 +184,61 @@ export class DynamicAttributeView extends Component {
         return valueObj ? valueObj.display_name || valueObj.name : valueId;
     }
 
-    onSearchInput(value) {
+    async changePage(page) {
+        if (page < 1 || page > this.state.totalPages) {
+            return;
+        }
+        
+        this.state.currentPage = page;
+        await this.fetchData();
+    }
+    
+    async nextPage() {
+        await this.changePage(this.state.currentPage + 1);
+    }
+    
+    async prevPage() {
+        await this.changePage(this.state.currentPage - 1);
+    }
+
+    async onSearchInput(value) {
         this.state.searchInput = value.trim().toLowerCase();
-        this.applyFilters();
+        
+        // Reset to first page when searching
+        this.state.currentPage = 1;
+        
+        // Debounce search to avoid too many requests
+        if (this._searchTimeout) {
+            clearTimeout(this._searchTimeout);
+        }
+        
+        this._searchTimeout = setTimeout(() => {
+            this.fetchData();
+        }, 500);
     }
 
     clearSearch() {
         this.state.searchInput = "";
-        this.applyFilters();
+        this.state.currentPage = 1;
+        this.fetchData();
+        
         const searchInput = document.querySelector('.search-container input[type="text"]');
         if (searchInput) {
             searchInput.value = "";
         }
     }
 
-    onFilterChange(value) {
+    async onFilterChange(value) {
         this.state.filterType = value;
+        this.state.currentPage = 1;
         this.applyFilters();
     }
 
-    refreshData() {
+    async refreshData() {
         this.state.loading = true;
-        this.fetchData().then(() => {
-            this.state.loading = false;
-            this.notification.add(_t("Data refreshed"), { type: "success" });
-        });
+        this.state.currentPage = 1;
+        await this.fetchData();
+        this.notification.add(_t("Data refreshed"), { type: "success" });
     }
 
     formatQty(qty) {

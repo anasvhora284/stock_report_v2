@@ -51,6 +51,12 @@ The Dynamic Attribute View is a powerful Odoo module that provides an interactiv
 4. **Refreshing Data**:
    - Click the "Refresh" button to reload the latest stock data
 
+5. **Navigating Large Datasets**:
+   - For large product catalogs, the report uses pagination
+   - Navigate through pages using the controls at the bottom
+   - View the total product count and current page information
+   - The system loads only the necessary data for each page, improving performance
+
 ## Technical Workflow
 
 1. **Configuration Creation**:
@@ -60,17 +66,25 @@ The Dynamic Attribute View is a powerful Odoo module that provides an interactiv
 2. **Data Loading**:
    - Client action context passes configuration ID to the frontend component
    - Frontend component loads configuration details
-   - Frontend calls `get_report_data_by_config` to fetch data
+   - Frontend calls `get_report_data_by_config` to fetch data with pagination
    - Data is processed and displayed in the matrix format
 
-3. **Matrix Generation**:
+3. **Pagination Handling**:
+   - Page size limits the number of products loaded at once (default 20)
+   - Backend uses SQL optimization with LIMIT and OFFSET for efficient queries
+   - The system tracks total product count for proper pagination
+   - Frontend maintains current page state and updates data on page change
+
+4. **Matrix Generation**:
    - For products with multiple attributes, a matrix is generated
    - First attribute becomes row headers
    - Second attribute becomes column headers
    - Cells contain variants with matching attribute combinations
    - Cells are color-coded based on quantity levels
 
-4. **User Interactions**:
-   - Filtering updates the displayed products without requiring a server request
+5. **User Interactions**:
+   - Filtering by criteria operates on the loaded dataset
+   - Searching by name sends a new request with search parameters
    - Clicking on cells opens a modal with pre-loaded variant details
-   - Refreshing fetches new data from the server 
+   - Refreshing fetches new data from the server
+   - Pagination controls load different subsets of the dataset 

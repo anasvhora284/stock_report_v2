@@ -31,6 +31,24 @@ The Dynamic Attribute View module is built with a clear separation between backe
 
 ## Key Technical Insights
 
+### Performance Optimizations
+
+The module is specifically optimized for handling large datasets (5000+ products):
+
+1. **Pagination Implementation**:
+   - Backend uses SQL LIMIT/OFFSET for efficient data retrieval
+   - Frontend maintains page state and handles navigation
+   - Only loads necessary data for the current page
+
+2. **Direct SQL Queries**:
+   - Uses direct SQL instead of ORM for better performance with large datasets
+   - Optimized JOIN operations and subqueries
+   - Efficient counting queries for pagination
+
+3. **Context-Based Parameter Passing**:
+   - Parameters passed via context to maintain RPC compatibility
+   - Avoids issues with keyword arguments in Odoo model methods
+
 ### Matrix Generation
 
 The matrix generation algorithm works as follows:
@@ -52,19 +70,29 @@ _createAttributeMatrix(product) {
 1. Configuration ID is passed from menu to client action
 2. Client action loads the OWL component with configuration context
 3. Component fetches configuration details from backend
-4. Component calls the backend to get product data
-5. Data is processed and transformed for display
-6. Component renders the matrix view
-7. User interactions trigger client-side filtering and UI updates
+4. Component calls the backend to get product data with pagination parameters
+5. Backend retrieves data using optimized SQL queries
+6. Data is processed and transformed for display
+7. Component renders the matrix view
+8. User interactions trigger client-side filtering or server-side pagination
 
-### Performance Considerations
+### Asynchronous Operations
 
-- The module uses efficient filtering on the client side to avoid unnecessary server requests
-- The backend fetches all required data in a single call
-- Image URLs are constructed directly rather than loading binary content
-- The matrix is generated only once during initial load, then cached
+The module handles asynchronous operations for better user experience:
 
-### Extension Points
+1. **Loading States**:
+   - Shows a loading spinner during data fetching
+   - Prevents UI interaction during loading
+
+2. **Debounced Search**:
+   - Delays search requests to prevent excessive server calls
+   - Resets pagination when searching
+
+3. **Error Handling**:
+   - Proper error notifications
+   - Graceful UI degradation on error
+
+## Extension Points
 
 1. **Adding New Filters**:
    - Extend the `applyFilters` method in the JavaScript component
@@ -77,6 +105,10 @@ _createAttributeMatrix(product) {
 3. **Customizing the Matrix Display**:
    - Modify the `_createAttributeMatrix` method for different layouts
    - Update the XML template to render the matrix differently
+
+4. **Optimizing for Specific Use Cases**:
+   - Adjust pagination limits based on user needs
+   - Modify SQL queries to prioritize specific data
 
 ## Troubleshooting
 
@@ -95,5 +127,7 @@ Common issues and solutions:
    - Check menu creation process in `_create_menu_and_action`
 
 4. **Performance Issues**:
-   - Consider limiting the number of attributes or products
-   - Implement pagination if dealing with large datasets 
+   - Verify pagination is working correctly
+   - Check SQL query execution plans for bottlenecks
+   - Consider increasing page size for fewer but larger requests
+   - Ensure proper indexing on database tables 
