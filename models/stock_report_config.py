@@ -45,10 +45,8 @@ class StockReportConfig(models.Model):
         return super().unlink()
     
     def _create_menu_and_action(self):
-        """Create menu item and client action for this configuration"""
         self.ensure_one()
         
-        # Create client action
         action = self.env['ir.actions.client'].create({
             'name': self.name,
             'type': 'ir.actions.client',
@@ -63,7 +61,6 @@ class StockReportConfig(models.Model):
         })
         self.action_id = action.id
         
-        # Create menu item
         menu = self.env['ir.ui.menu'].create({
             'name': self.name,
             'action': f'ir.actions.client,{action.id}',
@@ -74,7 +71,6 @@ class StockReportConfig(models.Model):
         
     @api.model
     def get_available_configs(self):
-        """Get all available report configurations for UI selection"""
         configs = self.search([('active', '=', True)], order='sequence, name')
         return [{
             'id': config.id,

@@ -9,11 +9,10 @@ _logger = logging.getLogger(__name__)
 class ProductAttributeReport(models.Model):
     _name = 'product.attribute.report'
     _description = 'Product Attribute Report'
-    _auto = False  # Don't create database table
+    _auto = False
     _rec_name = 'product_name'
     _order = 'product_name, attribute_name'
     
-    # Fields for SQL view
     id = fields.Integer(readonly=True)
     product_id = fields.Many2one('product.product', string='Product Variant', readonly=True)
     product_tmpl_id = fields.Many2one('product.template', string='Product Template', readonly=True)
@@ -31,14 +30,9 @@ class ProductAttributeReport(models.Model):
     uom_id = fields.Many2one('uom.uom', string='Unit of Measure', readonly=True)
     
     def init(self):
-        """Initialize SQL view for the report"""
-        # First drop the view if it exists
         tools.drop_view_if_exists(self.env.cr, self._table)
-        
-        # Also try to drop the table if it exists
         self.env.cr.execute("DROP TABLE IF EXISTS %s CASCADE" % self._table)
         
-        # Create SQL view that joins product, attributes and stock data
         self.env.cr.execute("""
             CREATE OR REPLACE VIEW %s AS (
                 WITH stock_data AS (
@@ -80,15 +74,6 @@ class ProductAttributeReport(models.Model):
 
     @api.model
     def get_attribute_data(self, options=None):
-        """
-        Main method to get product variants with attributes & stock quantities
-        :param options: dictionary with configuration options
-            - attribute_ids: list of attribute IDs to filter on
-            - filter_zero: boolean to filter out zero quantities
-            - include_negative: boolean to include negative quantities
-            - use_forecast: boolean to use forecasted quantity instead of on-hand
-        :return: dictionary with products, variants, and attributes data
-        """
         if not options:
             options = {}
         
@@ -97,56 +82,45 @@ class ProductAttributeReport(models.Model):
         include_negative = options.get('include_negative', True)
         use_forecast = options.get('use_forecast', False)
         
-        # Get attribute information
         attributes = self.env['product.attribute'].browse(attribute_ids or [])
         if not attributes and not attribute_ids:
-            attributes = self.env['product.attribute'].search([], limit=10)  # Default to top 10 attributes
+            attributes = self.env['product.attribute'].search([], limit=10)
 
-        # Build domain for finding products with these attributes
         domain = [('type', '=', 'product'), ('active', '=', True)]
         if attribute_ids:
-            # Find templates with these attributes
             templates = self.env['product.template.attribute.value'].search(
                 [('attribute_id', 'in', attribute_ids)]
             ).mapped('product_tmpl_id')
             if templates:
                 domain.append(('product_tmpl_id', 'in', templates.ids))
         
-        # Find variants
         products = self.env['product.product'].search(domain)
         if not products:
             return {'products': [], 'variants': [], 'attributes': self._prepare_attribute_data(attributes)}
         
-        # Read product data efficiently
         fields_to_read = ['id', 'name', 'default_code', 'qty_available', 'virtual_available', 
                           'incoming_qty', 'outgoing_qty', 'uom_id', 'uom_name', 'product_tmpl_id', 'image_1920']
         product_data = products.read(fields_to_read)
         
-        # Add image URLs and calculate reserved quantity
         for product in product_data:
             product['image_url'] = f'/web/image/product.product/{product["id"]}/image_1920'
             product['reserved_quantity'] = product['qty_available'] - (product['virtual_available'] - product['incoming_qty'])
         
-        # Filter quantities if needed
         qty_field = 'virtual_available' if use_forecast else 'qty_available'
         if filter_zero:
             product_data = [p for p in product_data if p[qty_field] != 0]
         if not include_negative:
             product_data = [p for p in product_data if p[qty_field] >= 0]
             
-        # Get attribute values for all products
         variants = []
         for product in product_data:
-            # Get attribute values for this product using ORM
             product_obj = self.env['product.product'].browse(product['id'])
             attributes_data = {}
             
-            # Map attribute values
             for ptav in product_obj.product_template_attribute_value_ids:
                 if ptav.attribute_id.id in (attribute_ids or attributes.ids):
                     attributes_data[ptav.attribute_id.id] = ptav.product_attribute_value_id.id
             
-            # Use appropriate quantity based on settings
             main_qty = product['virtual_available'] if use_forecast else product['qty_available']
             
             variants.append({
@@ -176,7 +150,6 @@ class ProductAttributeReport(models.Model):
     
     @api.model
     def get_report_data_by_config(self, config_id):
-        """Get report data based on configuration ID, structured for matrix view"""
         if not config_id:
             return {'error': 'No configuration ID provided'}
             
@@ -191,17 +164,14 @@ class ProductAttributeReport(models.Model):
             'use_forecast': config.use_forecast,
         }
         
-        # Get regular data first
         data = self.get_attribute_data(options)
         
-        # Group variants by product template
         templates = {}
         template_variants = defaultdict(list)
         
         for variant in data['variants']:
             template_id = variant['product_tmpl_id']
             if template_id not in templates:
-                # Get template data
                 template = self.env['product.template'].browse(template_id)
                 templates[template_id] = {
                     'id': template_id,
@@ -212,25 +182,20 @@ class ProductAttributeReport(models.Model):
                     'variants': []
                 }
                 
-            # Add variant to template's variants
             template_variants[template_id].append(variant)
         
-        # Create matrix data structure
         result = {
             'attributes': data['attributes'],
             'products': []
         }
         
-        # For each template, create a product entry with matrix data
         for template_id, template_data in templates.items():
             variants = template_variants[template_id]
             template_attributes = {}
             
-            # Get template attribute configuration
             template_obj = self.env['product.template'].browse(template_id)
             attribute_lines = template_obj.attribute_line_ids
             
-            # Extract attribute information
             for line in attribute_lines:
                 if line.attribute_id.id in config.attribute_ids.ids:
                     template_attributes[line.attribute_id.id] = {
@@ -257,7 +222,6 @@ class ProductAttributeReport(models.Model):
         return result
         
     def _prepare_attribute_data(self, attributes):
-        """Prepare attribute data including values for frontend"""
         result = []
         for attribute in attributes:
             values = []
@@ -278,7 +242,6 @@ class ProductAttributeReport(models.Model):
         
     @api.model
     def get_attribute_matrix(self, template_id, attribute_ids=None):
-        """Get product attributes in a matrix format for templates with multiple attributes"""
         product_tmpl = self.env['product.template'].browse(template_id)
         if not product_tmpl:
             return {'error': 'Product template not found'}
@@ -287,17 +250,14 @@ class ProductAttributeReport(models.Model):
         if not attribute_lines:
             return {'error': 'Product has no attributes'}
             
-        # Get all attributes for this template
         attributes = attribute_lines.mapped('attribute_id')
         
-        # If attribute_ids is specified, filter to only those attributes
         if attribute_ids:
             attributes = attributes.filtered(lambda a: a.id in attribute_ids)
             
         if len(attributes) < 1:
             return {'error': 'No valid attributes found for this product'}
             
-        # Get all combinations of attributes
         matrix = {
             'template': {
                 'id': product_tmpl.id,
@@ -309,7 +269,6 @@ class ProductAttributeReport(models.Model):
             'variants': [],
         }
         
-        # Add attribute data
         for attribute in attributes:
             attr_line = attribute_lines.filtered(lambda l: l.attribute_id.id == attribute.id)
             values = []
@@ -326,7 +285,6 @@ class ProductAttributeReport(models.Model):
                 'values': values,
             })
         
-        # Add variant data with corresponding attribute values and quantities
         for variant in product_tmpl.product_variant_ids:
             variant_data = {
                 'id': variant.id,
@@ -341,7 +299,6 @@ class ProductAttributeReport(models.Model):
                 'attribute_values': {},
             }
             
-            # Add attribute values for this variant
             for ptav in variant.product_template_attribute_value_ids:
                 if ptav.attribute_id.id in attributes.ids:
                     variant_data['attribute_values'][ptav.attribute_id.id] = {

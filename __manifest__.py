@@ -24,7 +24,7 @@
             'stock_report_v2/static/src/js/dynamic_attribute_view_action.js',
             
             # Images
-            'stock_report_v2/static/src/img/no-image-found.svg',
+            'stock_report_v2/static/src/img/no-image-found.png',
         ],
     },
     'installable': True,
