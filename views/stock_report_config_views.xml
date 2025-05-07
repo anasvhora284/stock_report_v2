@@ -8,7 +8,8 @@
             <tree string="Stock Report Configurations">
                 <field name="sequence" widget="handle"/>
                 <field name="name"/>
-                <field name="attribute_ids" widget="many2many_tags"/>
+                <field name="primary_attribute_id"/>
+                <field name="secondary_attribute_id"/>
                 <field name="parent_menu_id"/>
                 <field name="use_forecast"/>
                 <field name="active" widget="boolean_toggle"/>
@@ -30,7 +31,8 @@
                     </div>
                     <group>
                         <group>
-                            <field name="attribute_ids" widget="many2many_tags"/>
+                            <field name="primary_attribute_id" required="1"/>
+                            <field name="secondary_attribute_id" required="1"/>
                             <field name="sequence"/>
                             <field name="parent_menu_id"/>
                         </group>
@@ -55,11 +57,14 @@
         <field name="arch" type="xml">
             <search string="Stock Report Configurations">
                 <field name="name"/>
-                <field name="attribute_ids"/>
+                <field name="primary_attribute_id"/>
+                <field name="secondary_attribute_id"/>
                 <field name="parent_menu_id"/>
                 <filter string="Archived" name="inactive" domain="[('active', '=', False)]"/>
                 <group expand="0" string="Group By">
                     <filter string="Parent Menu" name="parent_menu" context="{'group_by': 'parent_menu_id'}"/>
+                    <filter string="Primary Attribute" name="primary_attr" context="{'group_by': 'primary_attribute_id'}"/>
+                    <filter string="Secondary Attribute" name="secondary_attr" context="{'group_by': 'secondary_attribute_id'}"/>
                 </group>
             </search>
         </field>

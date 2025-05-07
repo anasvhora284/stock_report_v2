@@ -7,7 +7,8 @@ class StockReportConfig(models.Model):
     _order = "sequence, id"
     
     name = fields.Char(string="Name", required=True)
-    attribute_ids = fields.Many2many('product.attribute', string="Attributes", required=True)
+    primary_attribute_id = fields.Many2one('product.attribute', string="Primary Attribute", required=True)
+    secondary_attribute_id = fields.Many2one('product.attribute', string="Secondary Attribute", required=True)
     menu_id = fields.Many2one('ir.ui.menu', string="Menu Item", readonly=True, copy=False)
     parent_menu_id = fields.Many2one('ir.ui.menu', string="Parent Menu", required=True,
                                     default=lambda self: self.env.ref('stock.menu_stock_root', raise_if_not_found=False))
@@ -18,6 +19,12 @@ class StockReportConfig(models.Model):
     include_negative = fields.Boolean(string="Include Negative Quantities", default=True)
     action_id = fields.Many2one('ir.actions.client', string="Client Action", readonly=True, copy=False)
     
+    @api.constrains('primary_attribute_id', 'secondary_attribute_id')
+    def _check_attributes(self):
+        for record in self:
+            if record.primary_attribute_id and record.secondary_attribute_id and record.primary_attribute_id == record.secondary_attribute_id:
+                raise models.ValidationError(_("Primary and Secondary attributes cannot be the same."))
+    
     @api.model_create_multi
     def create(self, vals_list):
         records = super().create(vals_list)
@@ -27,7 +34,7 @@ class StockReportConfig(models.Model):
     
     def write(self, vals):
         result = super().write(vals)
-        if any(field in vals for field in ['name', 'attribute_ids', 'parent_menu_id']):
+        if any(field in vals for field in ['name', 'primary_attribute_id', 'secondary_attribute_id', 'parent_menu_id']):
             for record in self:
                 if record.menu_id:
                     record.menu_id.unlink()
@@ -53,7 +60,7 @@ class StockReportConfig(models.Model):
             'tag': 'dynamic_attribute_view',
             'context': {
                 'config_id': self.id,
-                'attribute_ids': self.attribute_ids.ids,
+                'attribute_ids': [self.primary_attribute_id.id, self.secondary_attribute_id.id],
                 'filter_zero': self.filter_zero,
                 'include_negative': self.include_negative,
                 'use_forecast': self.use_forecast,
@@ -75,8 +82,8 @@ class StockReportConfig(models.Model):
         return [{
             'id': config.id,
             'name': config.name,
-            'attribute_ids': config.attribute_ids.ids,
-            'attribute_names': config.attribute_ids.mapped('name'),
+            'attribute_ids': [config.primary_attribute_id.id, config.secondary_attribute_id.id],
+            'attribute_names': [config.primary_attribute_id.name, config.secondary_attribute_id.name],
             'filter_zero': config.filter_zero,
             'include_negative': config.include_negative,
             'use_forecast': config.use_forecast,

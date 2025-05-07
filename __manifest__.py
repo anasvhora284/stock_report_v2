@@ -5,9 +5,21 @@
     'description': """
         Advanced stock reports with dynamic attribute filtering.
         Easily create custom stock reports based on product attributes.
+        
+        Features:
+        - Dynamic matrix view based on product attributes
+        - Real-time stock quantity updates
+        - Advanced filtering and search capabilities
+        - Responsive design for all devices
+        - Support for multiple attribute combinations
+        - Detailed variant information
+        - Stock forecasting integration
     """,
     'category': 'Inventory',
     'version': '17.0.1.0.0',
+    'sequence': 1,
+    'author': 'Atharva System Pvt. Ltd.',
+    'website': 'https://www.atharvasystem.com',
     'depends': ['base', 'stock', 'product', 'web'],
     'data': [
         'security/ir.model.access.csv',
@@ -27,7 +39,9 @@
             'stock_report_v2/static/src/img/no-image-found.png',
         ],
     },
+    'demo': [],
     'installable': True,
-    'application': False,
+    'application': True,
+    'auto_install': False,
     'license': 'LGPL-3',
 } 
